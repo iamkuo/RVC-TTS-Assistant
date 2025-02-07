@@ -1,0 +1,33 @@
+# 忽略所有常見圖片格式
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.tif
+*.svg
+*.ico
+*.webp
+*.heic
+*.heif
+
+# 可能的 Photoshop、Illustrator、RAW 圖片檔
+*.psd
+*.ai
+*.eps
+*.raw
+*.cr2
+*.nef
+*.orf
+*.sr2
+
+# 其他相關縮略圖與快取
+Thumbs.db
+.DS_Store
+
+*.mp4
+*.msi
+
+*.pth
+*.wav
