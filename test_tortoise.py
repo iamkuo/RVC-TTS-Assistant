@@ -73,6 +73,7 @@ prompt_file_name = 'Lisa_Prompt'
 with open("RVCPrompts/" + prompt_file_name+ ".txt") as f: question_1 = f.read()
 conversation = [{"role": "user", "content": question_1+input("User Input:")}]
 
+generated_sounds_path = "generated_sounds/"
 
 while True:
     if conversation[-1]["content"] == "Stop": break
@@ -86,9 +87,9 @@ while True:
     for i in range(len(text)):
         gen = tts.tts(text[i], voice_samples=voice_samples, conditioning_latents=conditioning_latents,verbose=False)
         #gen = torch.cat(list(gen))
-        torchaudio.save("tortoise_generated_" + str(i) + ".wav", gen.squeeze(0).cpu(), 24000)
+        torchaudio.save(generated_sounds_path + "tortoise_generated_" + str(i) + ".wav", gen.squeeze(0).cpu(), 24000)
         print("completed tortoise generation")
-        rvc.infer_file('tortoise_generated_' + str(i) + '.wav', "output" + str(i) + ".wav")
+        rvc.infer_file(generated_sounds_path + 'tortoise_generated_' + str(i) + '.wav',generated_sounds_path + "output" + str(i) + ".wav")
         print("completed RVC generation")
     conversation.append({"role": "user", "content": input("User Input:")})
 
