@@ -2,7 +2,7 @@ import os
 import glob
 
 # 取得當前腳本所在目錄
-directory = os.path.dirname(os.path.abspath(__file__))
+directory = "/mnt/d/RVC-TTS-PIPELINE/generated_sounds"
 
 # 找到所有包含 'output' 或 'tortoise_generated' 的 .wav 檔案
 files = glob.glob(os.path.join(directory, "*output*.wav")) + \
