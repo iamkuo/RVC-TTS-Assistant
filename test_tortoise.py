@@ -64,8 +64,10 @@ text = 'Hello you have reached the voicemail of myname, please leave a message'
 # Load it and send it through Tortoise.
 voice_samples, conditioning_latents = load_voice(voice)
 
+rvc_model_name = 'lisa-genshin'
 rvc = RVCInference(device="cuda:0")
 rvc.f0up_key = -8
+rvc.load_model("RVCModels/" + rvc_model_name + ".pth")
 
 prompt_file_name = 'Lisa_Prompt'
 with open("RVCPrompts/" + prompt_file_name+ ".txt") as f: question_1 = f.read()
@@ -76,13 +78,18 @@ while True:
     if conversation[-1]["content"] == "Stop": break
     conversation.append(ollama.chat(
     model="mistral",
-    messages=conversation,stream=False))
-    gen = tts.tts(text, voice_samples=voice_samples, conditioning_latents=conditioning_latents)
-    #gen = torch.cat(list(gen))
-    torchaudio.save('tortoise_generated.wav', gen.squeeze(0).cpu(), 24000)
-    print("completed tortoise generation")
-    rvc.load_model("RVCModels/lisa-genshin.pth")
-    rvc.infer_file("tortoise_generated.wav", "output.wav")
+    messages=conversation,stream=False)["message"])
+    text = conversation[-1]["content"]
+    print(conversation[-1]["content"])
+    text.replace("\n","")
+    text = [i + "." for i in text.split(".")]
+    for i in range(len(text)):
+        gen = tts.tts(text[i], voice_samples=voice_samples, conditioning_latents=conditioning_latents,verbose=False)
+        #gen = torch.cat(list(gen))
+        torchaudio.save("tortoise_generated_" + str(i) + ".wav", gen.squeeze(0).cpu(), 24000)
+        print("completed tortoise generation")
+        rvc.infer_file('tortoise_generated_' + str(i) + '.wav', "output" + str(i) + ".wav")
+        print("completed RVC generation")
     conversation.append({"role": "user", "content": input("User Input:")})
 
 
