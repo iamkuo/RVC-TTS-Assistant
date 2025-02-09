@@ -18,31 +18,12 @@ import pyaudio
 
 import ollama
 
-"""
-def get_audio_files(directory, extensions=(".wav", ".mp3", ".flac", ".ogg")):
-    #掃描指定資料夾，取得所有符合副檔名的音檔路徑。
-    #:param directory: 要掃描的資料夾路徑
-    #:param extensions: 允許的音檔副檔名 (預設包含常見格式)
-    #:return: 包含音檔完整路徑的清單
-    audio_files = []
-    
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.lower().endswith(extensions):
-                audio_files.append(os.path.join(root, file))
-    
-    return audio_files
 
-# 指定要掃描的資料夾
-folder_path = "your/audio/folder/path"  # 這裡換成你的資料夾路徑
-# 取得音檔列表
-audio_file_list = get_audio_files(folder_path)
-"""
 
 # This will download all the models used by Tortoise from the HF hub.
 # tts = TextToSpeech()
 # If you want to use deepspeed the pass use_deepspeed=True nearly 2x faster than normal
-tts = TextToSpeech(use_deepspeed=True, kv_cache=True)
+tts = TextToSpeech(device="cuda:0",use_deepspeed=True, kv_cache=True)
 
 # This is the text that will be spoken.
 text = "Joining two modalities results in a surprising increase in generalization! What would happen if we combined them all?"
@@ -75,22 +56,38 @@ conversation = [{"role": "user", "content": question_1+input("User Input:")}]
 
 generated_sounds_path = "generated_sounds/"
 
+ollama_model_name = "mistral"
+
 while True:
+    with open("user_input.txt", "w", encoding="utf-8") as user_file: user_file.write("User:" + conversation[-1]["content"])
     if conversation[-1]["content"] == "Stop": break
-    conversation.append(ollama.chat(
-    model="mistral",
-    messages=conversation,stream=False)["message"])
-    text = conversation[-1]["content"]
+    sentences = [""]
+    idx = 0
+    
+    stream = ollama.chat(
+    model=ollama_model_name,
+    messages=conversation,stream=True)
     print(conversation[-1]["content"])
-    text.replace("\n","")
-    text = [i + "." for i in text.split(".")]
-    for i in range(len(text)):
-        gen = tts.tts(text[i], voice_samples=voice_samples, conditioning_latents=conditioning_latents,verbose=False)
-        #gen = torch.cat(list(gen))
-        torchaudio.save(generated_sounds_path + "tortoise_generated_" + str(i) + ".wav", gen.squeeze(0).cpu(), 24000)
-        print("completed tortoise generation")
-        rvc.infer_file(generated_sounds_path + 'tortoise_generated_' + str(i) + '.wav',generated_sounds_path + "output" + str(i) + ".wav")
-        print("completed RVC generation")
+    with open("ai_response.txt","w",encoding="utf-8") as ai_file:
+        ai_file.write(ollama_model_name+":")  # 持續寫入 AI 回應
+        ai_file.flush()  # 確保 OBS 能即時讀取
+        for chunk in stream:
+            chunk = chunk["message"]["content"]
+            ai_file.write(chunk)  # 持續寫入 AI 回應
+            ai_file.flush()  # 確保 OBS 能即時讀取
+            sentences[-1] += chunk
+            if(chunk == "."):
+                gen = tts.tts(sentences[-1], voice_samples=voice_samples, conditioning_latents=conditioning_latents,verbose=False)
+                torchaudio.save(generated_sounds_path + "tortoise_generated_" + str(idx) + ".wav", gen.squeeze(0).cpu(), 24000)
+                print("completed tortoise generation")
+                rvc.infer_file(generated_sounds_path + 'tortoise_generated_' + str(idx) + '.wav',generated_sounds_path + "output" + str(idx) + ".wav")
+                print("completed RVC generation")
+                sentences.append("")
+                idx += 1
+                ai_file.seek(0)
+                ai_file.truncate()
+                ai_file.flush()
+    conversation.append({"role": "assistant", "content": "".join(sentences)})
     conversation.append({"role": "user", "content": input("User Input:")})
 
 
