@@ -1,57 +1,65 @@
 import os
 import time
+import signal
+import multiprocessing
 import sounddevice as sd
-import scipy.io.wavfile as wav
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-from pydub import AudioSegment
+import soundfile as sf
+import sys  # 加入 sys 模組
 
-# 設定監控的資料夾
-watch_folder = "D:\RVC-TTS-PIPELINE\generated_sounds"  # 改成你要監控的資料夾路徑
+sd.default.device = "CABLE Input (VB-Audio Virtual Cable), Windows DirectSound"
+WATCH_FOLDER = "D:\RVC-TTS-PIPELINE\generated_sounds"
+stop_flag = multiprocessing.Event()  # 使用 multiprocessing 的 Event 來控制結束
+played_files = set()
 
-# 播放音訊的函式
-def play_audio(filename):
-    print(f"Playing {filename}...")
-    audio = AudioSegment.from_wav(filename)  # 使用 pydub 讀取 WAV 檔案
-    samples = np.array(audio.get_array_of_samples())  # 轉換為 numpy 陣列
-    rate = audio.frame_rate  # 音訊的採樣率
-    sd.play(samples, rate)  # 播放音訊
-    sd.wait()  # 等待音訊播放完成
-    print("Playback finished.")
-    
-    # 播放完成後刪除檔案
-    os.remove(filename)
-    print(f"Deleted {filename}.")
 
-# 監控新檔案加入的事件處理器
-class WatcherHandler(FileSystemEventHandler):
-    def __init__(self):
-        self.is_playing = False  # 控制是否正在播放
+def play_audio(file_path):
+    print(f"Playing: {file_path}")
+    data, samplerate = sf.read(file_path)
+    sd.play(data, samplerate)
+    sd.wait()
+    print(f"Finished: {file_path}")
 
-    def on_created(self, event):
-        # 檢查是否為新增的 .wav 檔案
-        if event.is_directory:
-            return
-        if event.src_path.endswith('.wav'):
-            if not self.is_playing:  # 如果正在播放音訊，則不處理
-                self.is_playing = True
-                play_audio(event.src_path)
-                self.is_playing = False
+    os.remove(file_path)
+    played_files.remove(file_path)
+    print(f"Deleted: {file_path}")
 
-# 設定監控器並啟動監控
-def start_watching():
-    event_handler = WatcherHandler()
-    observer = Observer()
-    observer.schedule(event_handler, watch_folder, recursive=False)
-    observer.start()
+def watch_folder():
+
+    while not stop_flag.is_set():
+        files = [f for f in os.listdir(WATCH_FOLDER) if f.endswith(".wav") and "output" in f]
+        files.sort()
+
+        for file in files:
+            if stop_flag.is_set():
+                break
+            file_path = os.path.join(WATCH_FOLDER, file)
+            if file_path not in played_files:
+                played_files.add(file_path)
+                play_audio(file_path)
+        
+        time.sleep(1)
+
+# 處理 `CTRL+C` 訊號
+def signal_handler(sig, frame):
+    print("\n偵測到 CTRL+C，正在停止程式...")
+    stop_flag.set()  # 設定事件，通知 `watch_folder()` 停止
+    sd.stop()  # 停止播放
+    sys.exit(0)  # 確保程式完全終止
+
+# 設定 `CTRL+C` 訊號監聽
+signal.signal(signal.SIGINT, signal_handler)
+
+if __name__ == "__main__":
+    print("Watching folder for new .wav files... (按 CTRL+C 停止)")
+
+    watch_process = multiprocessing.Process(target=watch_folder)
+    watch_process.start()
 
     try:
-        while True:
-            time.sleep(1)  # 每秒檢查一次資料夾
-            print("yee")
+        watch_process.join()  # 等待監測進程結束
     except KeyboardInterrupt:
-        observer.stop()
-    observer.join()
-
-# 開始監控
-start_watching()
+        print("手動終止程式...")
+        stop_flag.set()
+        watch_process.terminate()
+        watch_process.join()
+        sys.exit(0)
