@@ -4,8 +4,6 @@ import torchaudio
 import torch.nn as nn
 import torch.nn.functional as F
 
-import IPython
-
 from tortoise.api_fast import TextToSpeech
 from tortoise.utils.audio import load_audio, load_voice, load_voices
 
@@ -40,7 +38,7 @@ Had worn them really about the same,"""
 #preset = "fast"
 
 # Pick one of the voices from the output above
-voice = 'Noelle'
+voice = 'train_kennard'
 text = 'Hello you have reached the voicemail of myname, please leave a message'
 # Load it and send it through Tortoise.
 voice_samples, conditioning_latents = load_voice(voice)
