@@ -1,0 +1,1 @@
+\\wsl.localhost\Ubuntu\home\uncle_rick\tortoise-tts\tortoise\voices
