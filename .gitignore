@@ -31,3 +31,9 @@ Thumbs.db
 
 *.pth
 *.wav
+
+# Ignore development and vendor directories
+/RVC-beta0717/
+/.vscode/
+__pycache__/
+/VBCABLE_Driver_Pack45/
