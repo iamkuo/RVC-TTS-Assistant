@@ -9,7 +9,11 @@ from os.path import join as dirjoin
 import torch
 import soundfile as sf
 import sounddevice as sd
-from TTS.api import TTS as XTTS
+from xtts_rvc_infer import (
+    process_text,
+    rvc_pipe_convert,
+    init_xtts_model_with_deepspeed,
+)
 import ollama
 import pytchat
 
@@ -23,13 +27,8 @@ rvc_beta_path = os.path.join(WORKSPACE_ROOT, "RVC-beta0717")
 if rvc_beta_path not in sys.path:
     sys.path.insert(0, rvc_beta_path)
 
-# Shared helpers
-from xtts_rvc_infer import (
-    process_text,
-    convert_voice,
-)
-
 # --- Config ---
+out_idx = 6
 voice = 'Lisa'
 rvc_model_path = "D:/program/RVC-TTS-PIPELINE/RVCModels/"
 rvc_model_name = 'lisa-genshin'
@@ -37,6 +36,8 @@ prompt_file_path = "D:/program/RVC-TTS-PIPELINE/RVCPrompts/"
 prompt_file_name = 'Lisa_Prompt'
 generated_sounds_path = "D:/program/RVC-TTS-PIPELINE/generated_sounds/"
 ollama_model_name = "mistral"
+ai_response_file = os.path.join(WORKSPACE_ROOT, "ai_response.txt")
+user_input_file = os.path.join(WORKSPACE_ROOT, "user_input.txt")
 
 # RVC settings
 rvc_f0_key = -8
@@ -44,6 +45,15 @@ rvc_f0_key = -8
 # Globals
 audio_path = generated_sounds_path
 sentences_queue = queue.Queue()
+
+
+def write_text_file(path, text):
+    """Write text to a UTF-8 file (overwrite)."""
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+    except Exception as e:
+        print(f"Warning: could not write to {path}: {e}")
 
 
 def output_handler():
@@ -54,6 +64,11 @@ def output_handler():
         file_path = filename if os.path.isabs(filename) else dirjoin(audio_path, filename)
         print(f"Playing: {file_path}")
         try:
+            # Update ai_response.txt with the sentence that is about to play
+            try:
+                write_text_file(ai_response_file, ai_generated)
+            except Exception as e:
+                print(f"Warning: could not update ai_response file at playback start: {e}")
             data, samplerate = sf.read(file_path)
             sd.play(data, samplerate)
             sd.wait()
@@ -73,12 +88,20 @@ def init_common():
     # Ensure output directory
     os.makedirs(generated_sounds_path, exist_ok=True)
 
-    # Init TTS (high-level API)
-    print("Initializing XTTS model...")
-    tts = XTTS(
-        model_name="tts_models/multilingual/multi-dataset/xtts_v2",
-        progress_bar=True,
-        gpu=torch.cuda.is_available(),
+    # Clear output file at startup to avoid stale text
+    try:
+        write_text_file(ai_response_file, "")
+    except Exception as e:
+        print(f"Warning: could not clear {ai_response_file} at startup: {e}")
+
+    # Init TTS via shared helper (high-level API path by default)
+    print("Initializing XTTS model via xtts_rvc_infer...")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    tts = init_xtts_model_with_deepspeed(
+        config_path="",  # unused when use_deepspeed=False
+        checkpoint_path="",  # unused when use_deepspeed=False
+        device=device,
+        use_deepspeed=False,
     )
 
     # Resolve RVC model path
@@ -92,15 +115,8 @@ def init_common():
     # Configure audio output device best-effort
     try:
         current_devices = sd.query_devices()
-        # Choose first device with output channels
-        out_idx = None
-        for i, dev in enumerate(current_devices):
-            if dev.get('max_output_channels', 0) > 0:
-                out_idx = i
-                break
-        if out_idx is not None:
-            sd.default.device = (sd.default.device[0] if isinstance(sd.default.device, tuple) else sd.default.device, out_idx)
-            print(f"Using audio output device {out_idx}: {current_devices[out_idx]['name']}")
+        sd.default.device = (sd.default.device[6] if isinstance(sd.default.device, tuple) else sd.default.device, out_idx)
+        print(f"Using audio output device {out_idx}: {current_devices[out_idx]['name']}")
     except Exception as e:
         print(f"Warning: Could not set up audio device: {e}")
 
@@ -153,10 +169,9 @@ def handle_sentence(text, conversation, tts, speaker_wav, model_pth):
     # Try RVC conversion
     if model_pth is not None:
         try:
-            converted_file = convert_voice(
-                tts_wav_path=output_file_path,
-                model_pth_path=model_pth,
-                f0_up_key=rvc_f0_key,
+            converted_file = rvc_pipe_convert(
+                input_wav_path=output_file_path,
+                model_pth_path=model_pth
             )
             if converted_file and os.path.exists(converted_file):
                 sentences_queue.put((conversation[-1]["content"], text, converted_file))
@@ -202,6 +217,10 @@ def run_nostream():
         if message in reset_keywords:
             first = True
             continue
+        # Clear output file at the start of a new question
+        write_text_file(ai_response_file, "")
+        # Write the user's raw input to file immediately
+        write_text_file(user_input_file, message)
         if first:
             message = prompt + message
             first = False
@@ -243,6 +262,12 @@ def run_stream():
         print("Stream is not alive")
         return
 
+    # Ask once whether to manually verify each comment
+    try:
+        verify_each = input("Manually verify each comment? (y/n): ").strip().lower().startswith('y')
+    except KeyboardInterrupt:
+        return
+
     conversation = []
 
     t = threading.Thread(target=output_handler, daemon=True)
@@ -255,18 +280,26 @@ def run_stream():
 
     while True:
         for c in chat.get().sync_items():
-            if c.message in stop_keywords:
+            # Only moderators/owner can issue stop/reset commands
+            is_mod = bool(getattr(c.author, "isChatModerator", False) or getattr(c.author, "isChatOwner", False))
+            if is_mod and c.message in stop_keywords:
                 return
             if c.message in reset_keywords:
                 first = True
                 continue
-            # Ask for user confirmation
-            try:
-                if input(f"{c.datetime} [{c.author.name}]- {c.message} accept? (y/n): ").lower() != 'y':
-                    continue
-            except KeyboardInterrupt:
-                return
 
+            # Manual verification if enabled
+            if verify_each:
+                try:
+                    if input(f"{c.datetime} [{c.author.name}]- {c.message} accept? (y/n): ").strip().lower() != 'y':
+                        continue
+                except KeyboardInterrupt:
+                    return
+
+            # Write raw chat message to user file
+            # Clear output file at the start of a new accepted message
+            write_text_file(ai_response_file, "")
+            write_text_file(user_input_file, c.message)
             if first:
                 c.message = prompt + c.message
                 first = False

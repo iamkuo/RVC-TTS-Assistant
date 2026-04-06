@@ -12,14 +12,7 @@ from rvc_python.infer import RVCInference
 
 def rvc_pipe_convert(
     input_wav_path: str,
-    model_pth_path: str,
-    f0_up_key: int = 0,
-    f0_method: str = "rmvpe",
-    index_rate: float = 1.0,
-    filter_radius: int = 3,
-    rms_mix_rate: float = 0.5,
-    protect: float = 0.33,
-) -> Optional[str]:
+    model_pth_path: str):
     """Convert voice using daswer123/rvc-python.
 
     Args:
@@ -49,25 +42,7 @@ def rvc_pipe_convert(
         # Initialize rvc-python
         rvc = RVCInference(device=device)
         rvc.load_model(model_pth_path)
-
-        # Try to pass processing parameters if supported; fall back to defaults
-        kwargs = {}
-        # Common flags used by rvc-python (aligning with CLI/README)
-        kwargs.update({
-            "method": f0_method,           # harvest/crepe/rmvpe/pm
-            "pitch": int(f0_up_key),       # semitone shift
-            "index_rate": float(index_rate),
-            "filter_radius": int(filter_radius),
-            # resample_sr not exposed in our function; leave default (0)
-            "rms_mix_rate": float(rms_mix_rate),
-            "protect": float(protect),
-        })
-
-        try:
-            rvc.infer_file(input_wav_path, out_path, **kwargs)
-        except TypeError:
-            # Older versions may not accept kwargs; retry with minimal signature
-            rvc.infer_file(input_wav_path, out_path)
+        rvc.infer_file(input_wav_path, out_path)
 
         return out_path if os.path.exists(out_path) else None
     except Exception as e:
@@ -76,7 +51,6 @@ def rvc_pipe_convert(
 
         traceback.print_exc()
         return None
-
 
 def process_text(
     text: str,
@@ -114,36 +88,8 @@ def process_text(
         traceback.print_exc()
         return None, None, ""
 
-
-def convert_voice(
-    tts_wav_path: str,
-    model_pth_path: str,
-    f0_up_key: int = 0,
-    f0_method: str = "rmvpe",
-    index_rate: float = 1.0,
-    filter_radius: int = 3,
-    rms_mix_rate: float = 0.5,
-    protect: float = 0.33,
-) -> Optional[str]:
-    """Convert voice using rvc-python on a generated TTS WAV file.
-
-    Returns path to converted file or None.
-    """
-    return rvc_pipe_convert(
-        input_wav_path=tts_wav_path,
-        model_pth_path=model_pth_path,
-        f0_up_key=f0_up_key,
-        f0_method=f0_method,
-        index_rate=index_rate,
-        filter_radius=filter_radius,
-        rms_mix_rate=rms_mix_rate,
-        protect=protect,
-    )
-
-
 def init_xtts_model_with_deepspeed(
     config_path: str,
-    vocab_path: str,
     checkpoint_path: str,
     device: torch.device,
     use_deepspeed: bool = True,
@@ -156,7 +102,7 @@ def init_xtts_model_with_deepspeed(
     Returns the initialized model.
     """
     if use_deepspeed:
-        if not (os.path.exists(config_path) and os.path.exists(vocab_path) and os.path.exists(checkpoint_path)):
+        if not (os.path.exists(config_path) and os.path.exists(checkpoint_path)):
             raise FileNotFoundError("XTTS config/vocab/checkpoint path is invalid")
 
         config = XttsConfig()
@@ -165,7 +111,6 @@ def init_xtts_model_with_deepspeed(
         model.load_checkpoint(
             config,
             checkpoint_path=checkpoint_path,
-            vocab_path=vocab_path,
             use_deepspeed=True,
         )
         if device.type == "cuda":
@@ -262,7 +207,6 @@ if __name__ == "__main__":
     print(f"[HardTest] Initializing XTTS ({'DeepSpeed low-level' if USE_DEEPSPEED else 'high-level API'})...")
     xtts_model = init_xtts_model_with_deepspeed(
         config_path=XTTS_CONFIG,
-        vocab_path=XTTS_VOCAB,
         checkpoint_path=XTTS_CHECKPOINT,
         device=DEVICE,
         use_deepspeed=USE_DEEPSPEED,
@@ -281,7 +225,7 @@ if __name__ == "__main__":
 
     # RVC conversion via rvc-python
     print("[HardTest] Converting voice with rvc-python...")
-    rvc_out = convert_voice(
+    rvc_out = rvc_pipe_convert(
         tts_wav_path=TTS_OUT,
         model_pth_path=RVC_MODEL_PTH,
         f0_up_key=F0_KEY,
